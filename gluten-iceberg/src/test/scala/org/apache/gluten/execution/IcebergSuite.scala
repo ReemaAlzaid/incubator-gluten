@@ -620,6 +620,30 @@ abstract class IcebergSuite extends WholeStageTransformerSuite {
     }
   }
 
+  test("iceberg input_file_name function") {
+    withTable("iceberg_input_file_tb") {
+      spark.sql("""
+                  |create table iceberg_input_file_tb using iceberg as
+                  |(select 1 as col1, 'test' as col2)
+                  |""".stripMargin)
+
+      // Test that input_file_name() returns non-empty file paths
+      val df = spark.sql("""
+                           |select col1, col2, input_file_name() as filename
+                           |from iceberg_input_file_tb
+                           |""".stripMargin)
+      checkGlutenPlan[IcebergScanTransformer](df)
+
+      // Verify that filename is not empty
+      val result = df.collect()
+      assert(result.length > 0, "Query should return at least one row")
+      assert(
+        result.forall(row => row.getString(2) != null && row.getString(2).nonEmpty),
+        "input_file_name() should return non-empty file paths"
+      )
+    }
+  }
+
   test("test read v1 iceberg with partition drop") {
     val testTable = "test_table_with_partition"
     withTable(testTable) {

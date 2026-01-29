@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.extension.columnar
 
-import org.apache.gluten.execution.{BatchScanExecTransformer, FileSourceScanExecTransformer, ProjectExecTransformer}
+import org.apache.gluten.execution.{BatchScanExecTransformer, BatchScanExecTransformerBase, FileSourceScanExecTransformer, ProjectExecTransformer}
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, Expression, InputFileBlockLength, InputFileBlockStart, InputFileName, NamedExpression}
 import org.apache.spark.sql.catalyst.optimizer.CollapseProjectShim
@@ -128,6 +128,9 @@ object PushDownInputFileExpression {
       case p @ ProjectExec(projectList, child: BatchScanExecTransformer)
           if projectList.exists(containsInputFileRelatedExpr) =>
         child.copy(output = p.output.asInstanceOf[Seq[AttributeReference]])
+      case p @ ProjectExec(projectList, child: BatchScanExecTransformerBase)
+          if projectList.exists(containsInputFileRelatedExpr) =>
+        updateBatchScanOutput(child, p.output.asInstanceOf[Seq[AttributeReference]])
       case p1 @ ProjectExec(_, p2: ProjectExec) if canCollapseProject(p2) =>
         addFallbackTag(
           p2.copy(projectList =
@@ -152,6 +155,16 @@ object PushDownInputFileExpression {
         case _: Attribute => true
         case _ => false
       }
+    }
+
+    private def updateBatchScanOutput(
+        child: BatchScanExecTransformerBase,
+        output: Seq[AttributeReference]): SparkPlan = {
+      // withNewPushdownFilters returns BatchScanExecTransformerBase but the actual
+      // instance is a case class with copy method. We use reflection to call it.
+      val updated = child.withNewPushdownFilters(Seq.empty)
+      val copyMethod = updated.getClass.getMethod("copy", classOf[Seq[_]])
+      copyMethod.invoke(updated, output).asInstanceOf[SparkPlan]
     }
   }
 }
