@@ -1,0 +1,41 @@
+diff --git a/java/dataset/CMakeLists.txt b/java/dataset/CMakeLists.txt
+--- a/java/dataset/CMakeLists.txt
++++ b/java/dataset/CMakeLists.txt
+@@ -34,11 +34,36 @@
+ add_library(arrow_java_jni_dataset SHARED src/main/cpp/jni_wrapper.cc
+                                           src/main/cpp/jni_util.cc)
+ set_property(TARGET arrow_java_jni_dataset PROPERTY OUTPUT_NAME "arrow_dataset_jni")
++
++# Arrow static libs are built with RE2 enabled but the transitive dependency is
++# not propagated. Locate the matching static RE2 library from the build/installed
++# prefix (falls back to the cpp-jni bundle) and link it explicitly.
++find_library(RE2_STATIC_LIB
++             NAMES re2
++             PATHS
++               /Users/reema/velox/deps-install
++               /Users/reema/velox/deps-install/lib
++               ${CMAKE_PREFIX_PATH}
++               ${CMAKE_SOURCE_DIR}/../cpp/_build/re2_ep-install
++               ${CMAKE_SOURCE_DIR}/../cpp/re2_ep-install
++               ${CMAKE_SOURCE_DIR}/../cpp-jni/re2_ep-install
++            PATH_SUFFIXES lib lib64)
++
++if(NOT RE2_STATIC_LIB)
++  message(FATAL_ERROR "re2 static library not found; set RE2_STATIC_LIB")
++endif()
++file(GLOB ABSL_STATIC_LIBS "/Users/reema/velox/deps-install/lib/libabsl_*.a")
++if(NOT ABSL_STATIC_LIBS)
++  message(FATAL_ERROR "absl static libraries not found under /Users/reema/velox/deps-install/lib")
++endif()
+ target_link_libraries(arrow_java_jni_dataset
+                       arrow_java_jni_dataset_headers
+                       jni
+                       ArrowDataset::arrow_dataset_static
+-                      ArrowSubstrait::arrow_substrait_static)
++                      ArrowSubstrait::arrow_substrait_static
++                      ${RE2_STATIC_LIB}
++                      ${ABSL_STATIC_LIBS}
++                      "-framework CoreFoundation")
+ 
+ if(BUILD_TESTING)
+   add_executable(arrow-java-jni-dataset-test src/main/cpp/jni_util_test.cc

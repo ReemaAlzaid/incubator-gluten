@@ -25,7 +25,8 @@ if(NOT "$ENV{ZSTD_HOME}" STREQUAL "")
   file(TO_CMAKE_PATH "$ENV{ZSTD_HOME}" _zstd_path)
   message(STATUS "ZSTD_HOME: ${_zstd_path}")
 else()
-  set(_zstd_path "/usr/local")
+  # Default search paths: Homebrew on macOS (arm64/intel) and the usual /usr/local
+  set(_zstd_path "/opt/homebrew;/usr/local")
 endif()
 
 find_path(

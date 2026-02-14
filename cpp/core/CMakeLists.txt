@@ -230,7 +230,8 @@ endif()
 
 target_link_libraries(gluten PUBLIC Arrow::arrow
                                     Arrow::arrow_bundled_dependencies)
-target_link_libraries(gluten PRIVATE google::glog)
+target_link_libraries(gluten PRIVATE LZ4::lz4 Snappy::snappy ZLIB::ZLIB
+                                     ${ZSTD_LIBRARY} google::glog)
 
 install(TARGETS gluten DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/resources/libhdfs.so

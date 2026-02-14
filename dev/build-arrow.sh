@@ -32,6 +32,8 @@ function prepare_arrow_build() {
   cd arrow_ep
   patch -p1 < $CURRENT_DIR/../ep/build-velox/src/modify_arrow.patch
   patch -p1 < $CURRENT_DIR/../ep/build-velox/src/modify_arrow_dataset_scan_option.patch
+  patch -p1 < $CURRENT_DIR/../ep/build-velox/src/fix_arrow_jni_config.patch
+  patch -p1 < $CURRENT_DIR/../ep/build-velox/src/fix_arrow_jni_re2.patch
   patch -p1 < $CURRENT_DIR/../ep/build-velox/src/cmake-compatibility.patch
   patch -p1 < $CURRENT_DIR/../ep/build-velox/src/support_ibm_power.patch
   popd
@@ -49,7 +51,7 @@ function build_arrow_cpp() {
     fi
   fi
   cmake_install \
-       -DARROW_PARQUET=OFF \
+       -DARROW_PARQUET=ON \
        -DARROW_FILESYSTEM=ON \
        -DARROW_PROTOBUF_USE_SHARED=OFF \
        -DARROW_DEPENDENCY_USE_SHARED=OFF \
@@ -57,6 +59,7 @@ function build_arrow_cpp() {
        -DARROW_WITH_THRIFT=ON \
        -DARROW_WITH_LZ4=ON \
        -DARROW_WITH_SNAPPY=ON \
+       -DARROW_WITH_RE2=ON \
        -DARROW_WITH_ZLIB=${ARROW_WITH_ZLIB} \
        -DARROW_WITH_ZSTD=ON \
        -DARROW_JEMALLOC=OFF \

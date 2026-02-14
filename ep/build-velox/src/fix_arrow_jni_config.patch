@@ -1,0 +1,13 @@
+diff --git a/java/dataset/src/main/cpp/jni_wrapper.cc b/java/dataset/src/main/cpp/jni_wrapper.cc
+index 8d7dafd84..d4f9b3c4a 100644
+--- a/java/dataset/src/main/cpp/jni_wrapper.cc
++++ b/java/dataset/src/main/cpp/jni_wrapper.cc
+@@ -28,6 +28,7 @@
+ #include "arrow/array.h"
+ #include "arrow/array/concatenate.h"
+ #include "arrow/c/bridge.h"
+ #include "arrow/c/helpers.h"
++#include "arrow/util/config.h"
+ #include "arrow/dataset/api.h"
+ #include "arrow/dataset/file_base.h"
+ #include "arrow/dataset/file_csv.h"
