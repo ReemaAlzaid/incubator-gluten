@@ -75,7 +75,6 @@ abstract class IcebergSuite extends WholeStageTransformerSuite {
                                |""".stripMargin)
 
       val rows = df.collect()
-      println(s"iceberg input_file_name rows: ${rows.mkString(", ")}")
       checkGlutenPlan[IcebergScanTransformer](df)
       assert(
         rows.forall(row => !row.isNullAt(1) && row.getString(1).nonEmpty),
