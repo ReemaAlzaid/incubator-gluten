@@ -86,6 +86,8 @@ class VeloxConfig(conf: SQLConf) extends GlutenConfig(conf) {
 
   def cudfBatchSize: Int = getConf(CUDF_BATCH_SIZE)
 
+  def cudfShuffleMaxPrefetchBytes: Long = getConf(CUDF_SHUFFLE_MAX_PREFETCH_BYTES)
+
   def orcUseColumnNames: Boolean = getConf(ORC_USE_COLUMN_NAMES)
 
   def parquetUseColumnNames: Boolean = getConf(PARQUET_USE_COLUMN_NAMES)
@@ -94,6 +96,9 @@ class VeloxConfig(conf: SQLConf) extends GlutenConfig(conf) {
 
   def hashProbeDynamicFilterPushdownEnabled: Boolean =
     getConf(HASH_PROBE_DYNAMIC_FILTER_PUSHDOWN_ENABLED)
+
+  def valueStreamDynamicFilterEnabled: Boolean =
+    getConf(VALUE_STREAM_DYNAMIC_FILTER_ENABLED)
 }
 
 object VeloxConfig extends ConfigRegistry {
@@ -455,6 +460,14 @@ object VeloxConfig extends ConfigRegistry {
       .booleanConf
       .createWithDefault(true)
 
+  val VALUE_STREAM_DYNAMIC_FILTER_ENABLED =
+    buildConf("spark.gluten.sql.columnar.backend.velox.valueStream.dynamicFilter.enabled")
+      .doc(
+        "Whether to apply dynamic filters pushed down from hash probe in the ValueStream" +
+          " (shuffle reader) operator to filter rows before they reach the hash join.")
+      .booleanConf
+      .createWithDefault(false)
+
   val COLUMNAR_VELOX_FILE_HANDLE_CACHE_ENABLED =
     buildStaticConf("spark.gluten.sql.columnar.backend.velox.fileHandleCacheEnabled")
       .doc(
@@ -673,6 +686,13 @@ object VeloxConfig extends ConfigRegistry {
       .doc("Cudf input batch size after shuffle reader")
       .intConf
       .createWithDefault(Integer.MAX_VALUE)
+
+  val CUDF_SHUFFLE_MAX_PREFETCH_BYTES =
+    buildConf("spark.gluten.sql.columnar.backend.velox.cudf.shuffleMaxPrefetchBytes")
+      .doc("Maximum bytes to prefetch in CPU memory during GPU shuffle read while waiting" +
+        "for GPU available.")
+      .bytesConf(ByteUnit.BYTE)
+      .createWithDefaultString("1028MB")
 
   val MEMORY_DUMP_ON_EXIT =
     buildConf("spark.gluten.monitor.memoryDumpOnExit")
