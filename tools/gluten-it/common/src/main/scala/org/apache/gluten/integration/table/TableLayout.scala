@@ -14,28 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.gluten.utils;
+package org.apache.gluten.integration.table
 
-import org.apache.gluten.runtime.Runtime;
-import org.apache.gluten.runtime.RuntimeAware;
-import org.apache.gluten.vectorized.ColumnarBatchInIterator;
+import org.apache.spark.sql.types.StructType
 
-public class GpuBufferBatchResizerJniWrapper implements RuntimeAware {
-  private final Runtime runtime;
-
-  private GpuBufferBatchResizerJniWrapper(Runtime runtime) {
-    this.runtime = runtime;
-  }
-
-  public static GpuBufferBatchResizerJniWrapper create(Runtime runtime) {
-    return new GpuBufferBatchResizerJniWrapper(runtime);
-  }
-
-  @Override
-  public long rtHandle() {
-    return runtime.getHandle();
-  }
-
-  public native long create(
-      int minOutputBatchSize, long maxPrefetchBatchBytes, ColumnarBatchInIterator itr);
+trait TableLayout {
+  def listTableNames(): Seq[String]
+  def getSchema(tableName: String): StructType
+  def getPartitionColumns(tableName: String): Seq[String]
 }
