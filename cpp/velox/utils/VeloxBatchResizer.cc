@@ -16,6 +16,7 @@
  */
 
 #include "VeloxBatchResizer.h"
+#include "utils/CudfVectorUtils.h"
 
 namespace gluten {
 namespace {
@@ -23,7 +24,9 @@ namespace {
 class SliceRowVector : public ColumnarBatchIterator {
  public:
   SliceRowVector(int32_t maxOutputBatchSize, facebook::velox::RowVectorPtr in)
-      : maxOutputBatchSize_(maxOutputBatchSize), in_(in) {}
+      : maxOutputBatchSize_(maxOutputBatchSize), in_(std::move(in)) {
+    in_ = materializeVeloxRowVector(in_, in_->pool());
+  }
 
   std::shared_ptr<ColumnarBatch> next() override {
     int32_t remainingLength = in_->size() - cursor_;
@@ -80,13 +83,13 @@ std::shared_ptr<ColumnarBatch> VeloxBatchResizer::next() {
   uint64_t numBytes = cb->numBytes();
   if (cb->numRows() < minOutputBatchSize_ && numBytes <= preferredBatchBytes_) {
     auto vb = VeloxColumnarBatch::from(pool_, cb);
-    auto rv = vb->getRowVector();
+    auto rv = materializeVeloxRowVector(vb->getRowVector(), pool_);
     auto buffer = facebook::velox::RowVector::createEmpty(rv->type(), pool_);
     buffer->append(rv.get());
 
     for (cb = in_->next(); cb != nullptr; cb = in_->next()) {
       vb = VeloxColumnarBatch::from(pool_, cb);
-      rv = vb->getRowVector();
+      rv = materializeVeloxRowVector(vb->getRowVector(), pool_);
       uint64_t addedBytes = cb->numBytes();
       if (buffer->size() + rv->size() > maxOutputBatchSize_ ||
           numBytes + addedBytes > static_cast<uint64_t>(preferredBatchBytes_)) {
@@ -110,7 +113,7 @@ std::shared_ptr<ColumnarBatch> VeloxBatchResizer::next() {
 
   if (cb->numRows() > maxOutputBatchSize_) {
     auto vb = VeloxColumnarBatch::from(pool_, cb);
-    auto rv = vb->getRowVector();
+    auto rv = materializeVeloxRowVector(vb->getRowVector(), pool_);
     GLUTEN_CHECK(next_ == nullptr, "Invalid state");
     next_ = std::make_unique<SliceRowVector>(maxOutputBatchSize_, rv);
     auto next = next_->next();
