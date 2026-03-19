@@ -49,7 +49,7 @@ facebook::velox::RowVectorPtr materializeHashBuildInput(
         memoryPool,
         "",
         cudfVector->stream(),
-        facebook::velox::cudf_velox::get_temp_mr());
+        cudf::get_current_device_resource_ref());
   }
 #endif
   return rowVector;

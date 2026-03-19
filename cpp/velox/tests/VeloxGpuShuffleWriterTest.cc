@@ -148,7 +148,11 @@ RowVectorPtr mergeBufferColumnarBatches(std::vector<std::shared_ptr<GpuBufferCol
 
   // Convert back to Velox
   return cudf_velox::with_arrow::toVeloxColumn(
-      tableView, getDefaultMemoryManager()->getLeafMemoryPool().get(), "", vector->stream(), cudf_velox::get_temp_mr());
+      tableView,
+      getDefaultMemoryManager()->getLeafMemoryPool().get(),
+      "",
+      vector->stream(),
+      cudf::get_current_device_resource_ref());
 }
 
 std::vector<GpuShuffleTestParams> getTestParams() {
