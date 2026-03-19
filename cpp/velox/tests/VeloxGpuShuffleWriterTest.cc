@@ -19,6 +19,8 @@
 #include <arrow/io/api.h>
 
 #include "config/GlutenConfig.h"
+#include "jni/JniHashTable.h"
+#include "substrait/algebra.pb.h"
 #include "shuffle/VeloxGpuShuffleWriter.h"
 #include "shuffle/VeloxHashShuffleWriter.h"
 #include "tests/VeloxShuffleWriterTestBase.h"
@@ -109,6 +111,24 @@ RowVectorPtr mergeRowVectors(const std::vector<RowVectorPtr>& sources) {
   }
 
   return result;
+}
+
+std::shared_ptr<VeloxColumnarBatch> toCudfBatch(const RowVectorPtr& rowVector) {
+  auto veloxPool = getDefaultMemoryManager()->getLeafMemoryPool();
+  auto stream = cudf_velox::cudfGlobalStreamPool().get_stream();
+  auto table = cudf_velox::with_arrow::toCudfTable(
+      rowVector,
+      veloxPool.get(),
+      stream,
+      cudf_velox::get_output_mr());
+  stream.synchronize();
+  auto cudfVector = std::make_shared<cudf_velox::CudfVector>(
+      veloxPool.get(),
+      asRowType(rowVector->type()),
+      rowVector->size(),
+      std::move(table),
+      stream);
+  return std::make_shared<VeloxColumnarBatch>(cudfVector, rowVector->childrenSize());
 }
 
 RowVectorPtr mergeBufferColumnarBatches(std::vector<std::shared_ptr<GpuBufferColumnarBatch>>& bufferBatches) {
@@ -453,6 +473,36 @@ class GpuRoundRobinPartitioningShuffleWriterTest : public GpuVeloxShuffleWriterT
     return createShuffleWriterOptions(Partitioning::kRoundRobin, 4096);
   }
 };
+
+TEST_P(GpuSinglePartitioningShuffleWriterTest, broadcastHashTableBuildAcceptsCudfBatch) {
+  auto input = makeRowVector({
+      makeFlatVector<int64_t>({1, 1, 2, 3}),
+      makeFlatVector<int64_t>({101, 102, 201, 301}),
+  });
+  auto cudfBatch = toCudfBatch(input);
+  auto cudfVector = std::dynamic_pointer_cast<cudf_velox::CudfVector>(cudfBatch->getRowVector());
+  ASSERT_NE(cudfVector, nullptr);
+
+  const std::vector<std::string> joinKeys{"ws_warehouse_sk", "ws_order_number"};
+  std::vector<std::string> names(joinKeys.begin(), joinKeys.end());
+  std::vector<TypePtr> types{BIGINT(), BIGINT()};
+  std::vector<std::shared_ptr<ColumnarBatch>> batches{cudfBatch};
+
+  std::shared_ptr<HashTableBuilder> builder;
+  ASSERT_NO_THROW(
+      builder = nativeHashTableBuild(
+          joinKeys,
+          std::move(names),
+          std::move(types),
+          static_cast<int>(::substrait::JoinRel_JoinType::JoinRel_JoinType_JOIN_TYPE_INNER),
+          false,
+          false,
+          false,
+          0,
+          batches,
+          getDefaultMemoryManager()->getLeafMemoryPool()));
+  ASSERT_NE(builder, nullptr);
+}
 
 TEST_P(GpuSinglePartitioningShuffleWriterTest, single) {
   if (GetParam().shuffleWriterType != ShuffleWriterType::kHashShuffle) {

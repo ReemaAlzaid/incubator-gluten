@@ -27,7 +27,35 @@
 #include "velox/core/PlanNode.h"
 #include "velox/type/Type.h"
 
+#ifdef GLUTEN_ENABLE_GPU
+#include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
+#include "velox/experimental/cudf/vector/CudfVector.h"
+#endif
+
 namespace gluten {
+
+namespace {
+
+facebook::velox::RowVectorPtr materializeHashBuildInput(
+    const facebook::velox::RowVectorPtr& rowVector,
+    facebook::velox::memory::MemoryPool* memoryPool) {
+#ifdef GLUTEN_ENABLE_GPU
+  auto cudfVector = std::dynamic_pointer_cast<facebook::velox::cudf_velox::CudfVector>(rowVector);
+  if (cudfVector != nullptr) {
+    // Broadcast hash build accesses child vectors directly. Materialize a plain Velox RowVector
+    // for CudfVector-backed batches before handing them to the hash table builder.
+    return facebook::velox::cudf_velox::with_arrow::toVeloxColumn(
+        cudfVector->getTableView(),
+        memoryPool,
+        "",
+        cudfVector->stream(),
+        facebook::velox::cudf_velox::get_temp_mr());
+  }
+#endif
+  return rowVector;
+}
+
+} // namespace
 
 void JniHashTableContext::initialize(JNIEnv* env, JavaVM* javaVm) {
   vm_ = javaVm;
@@ -125,7 +153,9 @@ std::shared_ptr<HashTableBuilder> nativeHashTableBuild(
       memoryPool.get());
 
   for (auto i = 0; i < batches.size(); i++) {
-    auto rowVector = VeloxColumnarBatch::from(memoryPool.get(), batches[i])->getRowVector();
+    auto rowVector = materializeHashBuildInput(
+        VeloxColumnarBatch::from(memoryPool.get(), batches[i])->getRowVector(),
+        memoryPool.get());
     hashTableBuilder->addInput(rowVector);
   }
 
