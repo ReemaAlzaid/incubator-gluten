@@ -30,41 +30,23 @@ object Constants {
   val VANILLA_CONF: SparkConf = new SparkConf(false)
 
   val VELOX_CONF: SparkConf = new SparkConf(false)
-    .set("spark.gluten.sql.columnar.forceShuffledHashJoin", "true")
-    .set("spark.sql.parquet.enableVectorizedReader", "true")
     .set("spark.plugins", "org.apache.gluten.GlutenPlugin")
     .set("spark.shuffle.manager", "org.apache.spark.shuffle.sort.ColumnarShuffleManager")
-    .set("spark.sql.optimizer.runtime.bloomFilter.enabled", "true")
-    .set("spark.sql.optimizer.runtime.bloomFilter.applicationSideScanSizeThreshold", "0")
-    .set(
-      "spark.gluten.sql.columnar.physicalJoinOptimizeEnable",
-      "false"
-    ) // q72 slow if false, q64 fails if true
 
   val VELOX_WITH_CELEBORN_CONF: SparkConf = new SparkConf(false)
-    .set("spark.gluten.sql.columnar.forceShuffledHashJoin", "true")
-    .set("spark.gluten.sql.columnar.shuffle.celeborn.fallback.enabled", "false")
-    .set("spark.sql.parquet.enableVectorizedReader", "true")
     .set("spark.plugins", "org.apache.gluten.GlutenPlugin")
     .set("spark.shuffle.manager", "org.apache.spark.shuffle.gluten.celeborn.CelebornShuffleManager")
+    .set("spark.gluten.sql.columnar.shuffle.celeborn.fallback.enabled", "false")
     .set("spark.celeborn.shuffle.writer", "hash")
     .set("spark.celeborn.push.replicate.enabled", "false")
     .set("spark.celeborn.client.shuffle.compression.codec", "none")
     .set("spark.shuffle.service.enabled", "false")
     .set("spark.sql.adaptive.localShuffleReader.enabled", "false")
     .set("spark.dynamicAllocation.enabled", "false")
-    .set("spark.sql.optimizer.runtime.bloomFilter.enabled", "true")
-    .set("spark.sql.optimizer.runtime.bloomFilter.applicationSideScanSizeThreshold", "0")
-    .set(
-      "spark.gluten.sql.columnar.physicalJoinOptimizeEnable",
-      "false"
-    ) // q72 slow if false, q64 fails if true
     .set("spark.celeborn.push.data.timeout", "600s")
     .set("spark.celeborn.push.limit.inFlight.timeout", "1200s")
 
   val VELOX_WITH_UNIFFLE_CONF: SparkConf = new SparkConf(false)
-    .set("spark.gluten.sql.columnar.forceShuffledHashJoin", "true")
-    .set("spark.sql.parquet.enableVectorizedReader", "true")
     .set("spark.plugins", "org.apache.gluten.GlutenPlugin")
     .set("spark.shuffle.manager", "org.apache.spark.shuffle.gluten.uniffle.UniffleShuffleManager")
     .set("spark.rss.coordinator.quorum", "localhost:19999")
@@ -74,9 +56,6 @@ object Constants {
     .set("spark.shuffle.service.enabled", "false")
     .set("spark.sql.adaptive.localShuffleReader.enabled", "false")
     .set("spark.dynamicAllocation.enabled", "false")
-    .set("spark.sql.optimizer.runtime.bloomFilter.enabled", "true")
-    .set("spark.sql.optimizer.runtime.bloomFilter.applicationSideScanSizeThreshold", "0")
-    .set("spark.gluten.sql.columnar.physicalJoinOptimizeEnable", "false")
 
   val VANILLA_METRIC_MAPPER: MetricMapper = SimpleMetricMapper(
     Seq(MetricTag.IsSelfTime),
@@ -152,6 +131,8 @@ object Constants {
   @deprecated
   val TYPE_MODIFIER_DATE_AS_DOUBLE: TypeModifier =
     new TypeModifier(TypeUtils.typeAccepts(_, DateType), DoubleType) {
+      override def name(): String = "data_as_double"
+
       override def modValue(from: Any): Any = {
         from match {
           case v: Date => v.getTime.asInstanceOf[Double] / 86400.0d / 1000.0d
@@ -162,6 +143,8 @@ object Constants {
   @deprecated
   val TYPE_MODIFIER_INTEGER_AS_DOUBLE: TypeModifier =
     new TypeModifier(TypeUtils.typeAccepts(_, IntegerType), DoubleType) {
+      override def name(): String = "integer_as_double"
+
       override def modValue(from: Any): Any = {
         from match {
           case v: Int => v.asInstanceOf[Double]
@@ -172,6 +155,8 @@ object Constants {
   @deprecated
   val TYPE_MODIFIER_LONG_AS_DOUBLE: TypeModifier =
     new TypeModifier(TypeUtils.typeAccepts(_, LongType), DoubleType) {
+      override def name(): String = "long_as_double"
+
       override def modValue(from: Any): Any = {
         from match {
           case v: Long => v.asInstanceOf[Double]
@@ -182,6 +167,8 @@ object Constants {
   @deprecated
   val TYPE_MODIFIER_DATE_AS_STRING: TypeModifier =
     new TypeModifier(TypeUtils.typeAccepts(_, DateType), StringType) {
+      override def name(): String = "date_as_string"
+
       override def modValue(from: Any): Any = {
         from match {
           case v: Date => v.toString
@@ -191,6 +178,8 @@ object Constants {
 
   val TYPE_MODIFIER_DECIMAL_AS_DOUBLE: TypeModifier =
     new TypeModifier(TypeUtils.decimalAccepts, DoubleType) {
+      override def name(): String = "decimal_as_double"
+
       override def modValue(from: Any): Any = {
         from match {
           case v: java.math.BigDecimal => v.doubleValue()

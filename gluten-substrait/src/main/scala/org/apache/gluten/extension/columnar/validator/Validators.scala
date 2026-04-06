@@ -33,6 +33,7 @@ import org.apache.spark.sql.execution.exchange.{BroadcastExchangeExec, ShuffleEx
 import org.apache.spark.sql.execution.joins._
 import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.hive.HiveTableScanExecTransformer
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType}
 
 object Validators {
   implicit class ValidatorBuilderImplicits(builder: Validator.Builder) {
@@ -76,6 +77,11 @@ object Validators {
 
     def fallbackByTestInjects(): Validator.Builder = {
       builder.add(new FallbackByTestInjects())
+    }
+
+    /** Fails validation if a plan node's input or output schema contains TimestampNTZType. */
+    def fallbackByTimestampNTZ(): Validator.Builder = {
+      builder.add(new FallbackByTimestampNTZ())
     }
 
     /**
@@ -212,6 +218,25 @@ object Validators {
     }
   }
 
+  private class FallbackByTimestampNTZ() extends Validator {
+    override def validate(plan: SparkPlan): Validator.OutCome = {
+      def containsNTZ(dataType: DataType): Boolean = dataType match {
+        case dt if dt.catalogString == "timestamp_ntz" => true
+        case st: StructType => st.exists(f => containsNTZ(f.dataType))
+        case at: ArrayType => containsNTZ(at.elementType)
+        case mt: MapType => containsNTZ(mt.keyType) || containsNTZ(mt.valueType)
+        case _ => false
+      }
+      val hasNTZ = plan.output.exists(a => containsNTZ(a.dataType)) ||
+        plan.children.exists(_.output.exists(a => containsNTZ(a.dataType)))
+      if (hasNTZ) {
+        fail(s"${plan.nodeName} has TimestampNTZType in input/output schema")
+      } else {
+        pass()
+      }
+    }
+  }
+
   private class FallbackIfScanOnlyWithFilterPushed(scanOnly: Boolean) extends Validator {
     override def validate(plan: SparkPlan): Validator.OutCome = {
       if (!scanOnly) {
@@ -277,10 +302,6 @@ object Validators {
   /**
    * A validator that doesn't involve native validation.
    *
-   * This is typically RAS planner that does native validation inline without relying on tags. Thus,
-   * validator `#fallbackByNativeValidation` is not required. See
-   * [[org.apache.gluten.extension.columnar.enumerated.RasOffload]].
-   *
    * This could also be used in legacy planner for doing trivial offload without the help of rewrite
    * rules.
    */
@@ -292,6 +313,7 @@ object Validators {
       .fallbackComplexExpressions()
       .fallbackByBackendSettings()
       .fallbackByUserOptions()
+      .fallbackByTimestampNTZ()
       .fallbackByTestInjects()
       .build()
   }

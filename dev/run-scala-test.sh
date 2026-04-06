@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.
@@ -23,7 +23,7 @@
 # due to the conflict between -Dsuites and -am parameters.
 #
 # Usage:
-#   ./dev/run-scala-test.sh [options] -P<profiles> -pl <module> -s <suite> [-t "test name"]
+#   ./dev/run-scala-test.sh [options] -P<profiles> -pl <module> -s <suite> [-s <suite2> ...] [-t "test name"]
 #
 # Examples:
 #   # Run entire suite
@@ -39,26 +39,30 @@
 #     -s org.apache.spark.sql.GlutenDeprecatedDatasetAggregatorSuite \
 #     -t "typed aggregation: class input with reordering"
 #
-#   # With Maven Daemon (mvnd) for faster builds
+#   # Run multiple suites in one JVM
 #   ./dev/run-scala-test.sh \
-#     -Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,spark-ut \
+#     -Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,spark-ut,delta \
 #     -pl gluten-ut/spark40 \
-#     -s org.apache.spark.sql.GlutenDeprecatedDatasetAggregatorSuite \
-#     --mvnd
+#     -s org.apache.spark.sql.GlutenTPCDSV1_4_PlanStabilitySuite \
+#     -s org.apache.spark.sql.GlutenTPCHPlanStabilitySuite
 #
-#   # With Maven profiler enabled
-#   ./dev/run-scala-test.sh \
+#   # With Maven Daemon (mvnd) for faster builds
+#   ./dev/run-scala-test.sh --mvnd \
 #     -Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,spark-ut \
 #     -pl gluten-ut/spark40 \
-#     -s org.apache.spark.sql.GlutenDeprecatedDatasetAggregatorSuite \
-#     --profile
+#     -s org.apache.spark.sql.GlutenDeprecatedDatasetAggregatorSuite
+#
+#   # Clean build (required when switching Maven profiles)
+#   ./dev/run-scala-test.sh --mvnd --clean \
+#     -Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3,spark-ut \
+#     -pl gluten-ut/spark41 \
+#     -s org.apache.spark.sql.GlutenTPCDSV1_4_PlanStabilitySuite
 #
 #   # Export classpath only (no test execution)
-#   ./dev/run-scala-test.sh \
+#   ./dev/run-scala-test.sh --export-only \
 #     -Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,spark-ut \
 #     -pl gluten-ut/spark40 \
-#     -s org.apache.spark.sql.GlutenDeprecatedDatasetAggregatorSuite \
-#     --export-only
+#     -s org.apache.spark.sql.GlutenDeprecatedDatasetAggregatorSuite
 #
 # =============================================================================
 
@@ -197,17 +201,17 @@ declare -A MODULE_MAP=(
 
 print_usage() {
   cat << EOF
-Usage: $0 [options] -P<profiles> -pl <module> -s <suite> [-t "test name"]
+Usage: $0 [options] -P<profiles> -pl <module> -s <suite> [-s <suite2> ...] [-t "test name"]
 
 Required:
   -P<profiles>      Maven profiles (e.g., -Pjava-17,spark-4.0,scala-2.13,backends-velox)
   -pl <module>      Target module (e.g., gluten-ut/spark40)
-  -s <suite>        Full suite class name
+  -s <suite>        Full suite class name (can specify multiple -s for multiple suites)
 
 Optional:
   -t "test name"    Specific test method name to run
   --mvnd            Use Maven Daemon (mvnd) instead of ./build/mvn
-  --clean           Run 'mvn clean' before compiling
+  --clean           Run 'mvn clean' before compiling (use when switching profiles)
   --force           Force Maven rebuild, bypass build cache
   --profile         Enable Maven profiler (reports in .profiler/)
   --export-only     Export classpath and exit (no test execution)
@@ -224,6 +228,12 @@ Examples:
      -pl gluten-ut/spark40 \\
      -s org.apache.spark.sql.GlutenDeprecatedDatasetAggregatorSuite \\
      -t "typed aggregation: class input with reordering"
+
+  # Run multiple suites in one JVM
+  $0 -Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,spark-ut,delta \\
+     -pl gluten-ut/spark40 \\
+     -s org.apache.spark.sql.GlutenTPCDSV1_4_PlanStabilitySuite \\
+     -s org.apache.spark.sql.GlutenTPCHPlanStabilitySuite
 EOF
 }
 
@@ -330,7 +340,7 @@ replace_gluten_paths() {
 
 PROFILES=""
 MODULE=""
-SUITE=""
+SUITES=()
 TEST_METHOD=""
 EXTRA_MVN_ARGS=""
 ENABLE_PROFILER=false
@@ -350,7 +360,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -s)
-      SUITE="$2"
+      SUITES+=("$2")
       shift 2
       ;;
     -t)
@@ -402,7 +412,7 @@ if [[ -z "$MODULE" ]]; then
   exit 1
 fi
 
-if [[ -z "$SUITE" ]]; then
+if [[ ${#SUITES[@]} -eq 0 ]]; then
   log_error "Missing required argument: -s <suite>"
   print_usage
   exit 1
@@ -527,14 +537,9 @@ fi
 ${MVN_CMD} ${MVN_GOALS} \
   -T 1C -q \
   -pl "${MODULE}" -am \
-  -P"${PROFILES}" \
+  -P"${PROFILES},fast-build" \
   -DincludeScope=test \
   -Dmdep.outputFile="${CLASSPATH_FILE}" \
-  -Dspotless.check.skip=true \
-  -Dscalastyle.skip=true \
-  -Dcheckstyle.skip=true \
-  -Dmaven.gitcommitid.skip=true \
-  -Dremoteresources.skip=true \
   ${EXTRA_MVN_ARGS}
 
 if [[ ! -f "${CLASSPATH_FILE}" ]]; then
@@ -557,7 +562,8 @@ log_step "Step 2: Getting JVM arguments from pom.xml..."
 
 TIMER_STEP2_START=$(timer_now)
 
-JVM_ARGS_RAW=$(${MVN_CMD} help:evaluate \
+# Always use build/mvn for help:evaluate (mvnd returns empty output for this goal)
+JVM_ARGS_RAW=$(./build/mvn help:evaluate \
   -Dexpression=extraJavaTestArgs \
   -q -DforceStdout \
   -P"${PROFILES}" 2>/dev/null || echo "")
@@ -616,14 +622,87 @@ TIMING_STEP3=$(timer_elapsed $TIMER_STEP3_START $TIMER_STEP3_END)
 log_timing "Step 3 - Resolve classpath" "$TIMING_STEP3"
 
 # =============================================================================
-# Step 3.5: Export-only mode (if requested)
+# Step 3.5: Create pathing JAR
+# =============================================================================
+# A "pathing JAR" is a thin JAR whose MANIFEST.MF Class-Path header lists all
+# the real classpath entries as file: URIs. This avoids exceeding OS command-line
+# length limits. Works on Java 8+ (unlike @argfile which requires Java 9+).
+# Also includes META-INF/classpath.txt for human-readable review.
+# =============================================================================
+
+PATHING_JAR="/tmp/gluten-test-pathing-$$.jar"
+rm -f "${PATHING_JAR}"
+
+PATHING_MANIFEST_DIR="/tmp/gluten-test-manifest-$$"
+mkdir -p "${PATHING_MANIFEST_DIR}/META-INF"
+
+# Convert colon-separated classpath to space-separated file: URIs for manifest.
+# Also write a human-readable classpath listing (one entry per line, same order).
+CP_URIS=""
+IFS=':' read -ra _CP_ITEMS <<< "${RESOLVED_CLASSPATH}"
+: > "${PATHING_MANIFEST_DIR}/META-INF/classpath.txt"
+
+for _item in "${_CP_ITEMS[@]}"; do
+  [[ -z "$_item" ]] && continue
+  echo "$_item" >> "${PATHING_MANIFEST_DIR}/META-INF/classpath.txt"
+  # Ensure directories end with / (required by Class-Path spec for directories)
+  [[ -d "$_item" && "$_item" != */ ]] && _item="${_item}/"
+  CP_URIS="${CP_URIS} file://${_item}"
+done
+CP_URIS="${CP_URIS# }"
+
+# Write manifest with proper 72-byte line wrapping.
+# MANIFEST.MF spec: max 72 bytes per line; continuation lines start with
+# a single space character.
+{
+  echo "Manifest-Version: 1.0"
+  _mf_header="Class-Path: ${CP_URIS}"
+  echo "${_mf_header:0:72}"
+  _mf_rest="${_mf_header:72}"
+  while [[ -n "$_mf_rest" ]]; do
+    echo " ${_mf_rest:0:71}"
+    _mf_rest="${_mf_rest:71}"
+  done
+  echo ""
+} > "${PATHING_MANIFEST_DIR}/META-INF/MANIFEST.MF"
+
+# Build the pathing JAR (manifest + human-readable classpath listing)
+(cd "${PATHING_MANIFEST_DIR}" && jar cfm "${PATHING_JAR}" META-INF/MANIFEST.MF META-INF/classpath.txt)
+rm -rf "${PATHING_MANIFEST_DIR}"
+log_info "Created pathing JAR: ${PATHING_JAR} ($(du -h "${PATHING_JAR}" | cut -f1))"
+log_info "  Review classpath: unzip -p ${PATHING_JAR} META-INF/classpath.txt"
+
+# =============================================================================
+# Build java command (shared by export-only and run modes)
+# =============================================================================
+
+JAVA_CMD="${JAVA_HOME}/bin/java"
+[[ ! -x "$JAVA_CMD" ]] && JAVA_CMD="java"
+
+SPARK_TEST_HOME_ARG=""
+[[ -n "$SPARK_HOME" ]] && SPARK_TEST_HOME_ARG="-Dspark.test.home=${SPARK_HOME}"
+
+JAVA_ARGS=(
+  ${JVM_ARGS}
+  "-Dlog4j.configurationFile=file:${GLUTEN_HOME}/${MODULE}/src/test/resources/log4j2.properties"
+  ${SPARK_TEST_HOME_ARG}
+  -cp "${PATHING_JAR}"
+  org.scalatest.tools.Runner
+  -oDF
+)
+for s in "${SUITES[@]}"; do
+  JAVA_ARGS+=(-s "$s")
+done
+[[ -n "$TEST_METHOD" ]] && JAVA_ARGS+=(-t "${TEST_METHOD}")
+# =============================================================================
+# Step 3.6: Export-only mode (if requested)
 # =============================================================================
 
 if [[ "$EXPORT_ONLY" == "true" ]]; then
-  EXPORT_FILE="/tmp/gluten-classpath-exported.txt"
-  echo "$RESOLVED_CLASSPATH" > "$EXPORT_FILE"
-  log_info "✓ Classpath exported to: ${EXPORT_FILE}"
-  log_info "  Use with: java <jvm-args> -cp \"\$(cat ${EXPORT_FILE})\" org.scalatest.tools.Runner -s <suite>"
+  echo ""
+  echo -e "${YELLOW}# Run the test with:${NC}"
+  echo "${JAVA_CMD} ${JAVA_ARGS[*]}"
+  echo ""
   print_timing_summary false
   exit 0
 fi
@@ -634,13 +713,7 @@ fi
 
 log_step "Step 4: Running ScalaTest..."
 
-# Find Java
-JAVA_CMD="${JAVA_HOME}/bin/java"
-if [[ ! -x "$JAVA_CMD" ]]; then
-  JAVA_CMD="java"
-fi
-
-log_info "Suite: ${SUITE}"
+log_info "Suite(s): ${SUITES[*]}"
 [[ -n "$TEST_METHOD" ]] && log_info "Test method: ${TEST_METHOD}"
 
 echo ""
@@ -649,21 +722,12 @@ echo "Running ScalaTest"
 echo "=========================================="
 echo ""
 
-# Build test method args conditionally
-TEST_METHOD_ARGS=()
-[[ -n "$TEST_METHOD" ]] && TEST_METHOD_ARGS=(-t "${TEST_METHOD}")
-
 TIMER_STEP4_START=$(timer_now)
 
 TEST_EXIT_CODE=0
-${JAVA_CMD} \
-  ${JVM_ARGS} \
-  -Dlog4j.configurationFile=file:${GLUTEN_HOME}/${MODULE}/src/test/resources/log4j2.properties \
-  -cp "${RESOLVED_CLASSPATH}" \
-  org.scalatest.tools.Runner \
-  -s "${SUITE}" \
-  "${TEST_METHOD_ARGS[@]}" \
-  -oDF || TEST_EXIT_CODE=$?
+${JAVA_CMD} "${JAVA_ARGS[@]}" || TEST_EXIT_CODE=$?
+
+rm -f "${PATHING_JAR}"
 
 TIMER_STEP4_END=$(timer_now)
 TIMING_STEP4=$(timer_elapsed $TIMER_STEP4_START $TIMER_STEP4_END)

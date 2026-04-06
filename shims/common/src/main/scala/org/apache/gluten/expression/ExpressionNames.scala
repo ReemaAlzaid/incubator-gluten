@@ -141,6 +141,7 @@ object ExpressionNames {
   final val MASK = "mask"
   final val FORMAT_STRING = "format_string"
   final val LUHN_CHECK = "luhn_check"
+  final val TO_PRETTY_STRING = "to_pretty_string"
 
   // URL functions
   final val PARSE_URL = "parse_url"
@@ -193,6 +194,7 @@ object ExpressionNames {
   final val REMAINDER = "modulus"
   final val FACTORIAL = "factorial"
   final val RAND = "rand"
+  final val RANDSTR = "randstr"
   final val RINT = "rint"
   final val RIGHT = "right"
 
@@ -303,6 +305,7 @@ object ExpressionNames {
   final val MAP_ZIP_WITH = "map_zip_with"
   final val TRANSFORM_KEYS = "transform_keys"
   final val TRANSFORM_VALUES = "transform_values"
+  final val MAP_FROM_ENTRIES = "map_from_entries"
   final val STR_TO_MAP = "str_to_map"
   final val MAP_FILTER = "map_filter"
   final val MAP_CONTAINS_KEY = "map_contains_key"
@@ -346,6 +349,7 @@ object ExpressionNames {
   final val VERSION = "version"
   final val AT_LEAST_N_NON_NULLS = "at_least_n_non_nulls"
   final val ASSERT_TRUE = "assert_true"
+  final val ASSERT_NOT_NULL = "assert_not_null"
   final val NULLIF = "nullif"
   final val NVL = "nvl"
   final val NVL2 = "nvl2"

@@ -19,12 +19,15 @@
 
 #include "TypeUtils.h"
 #include "VariantToVectorConverter.h"
+#include "jni/JniHashTable.h"
+#include "operators/hashjoin/HashTableBuilder.h"
 #include "operators/plannodes/RowVectorStream.h"
 #include "velox/connectors/hive/HiveDataSink.h"
 #include "velox/exec/TableWriter.h"
 #include "velox/type/Type.h"
 
 #include "utils/ConfigExtractor.h"
+#include "utils/ObjectStore.h"
 #include "utils/VeloxWriterUtils.h"
 
 #include "config.pb.h"
@@ -83,8 +86,8 @@ EmitInfo getEmitInfo(const ::substrait::RelCommon& relCommon, const core::PlanNo
   const auto& emit = relCommon.emit();
   int emitSize = emit.output_mapping_size();
   EmitInfo emitInfo;
-  emitInfo.projectNames.reserve(emitSize);
-  emitInfo.expressions.reserve(emitSize);
+  emitInfo.projectNames.resize(emitSize);
+  emitInfo.expressions.resize(emitSize);
   const auto& outputType = node->outputType();
   for (int i = 0; i < emitSize; i++) {
     int32_t mapId = emit.output_mapping(i);
@@ -393,6 +396,43 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
         rightNode,
         getJoinOutputType(leftNode, rightNode, joinType));
 
+  } else if (
+      sJoin.has_advanced_extension() &&
+      SubstraitParser::configSetInOptimization(sJoin.advanced_extension(), "isBHJ=")) {
+    std::string hashTableId = sJoin.hashtableid();
+
+    std::shared_ptr<core::OpaqueHashTable> opaqueSharedHashTable = nullptr;
+    bool joinHasNullKeys = false;
+
+    try {
+      auto hashTableBuilder = ObjectStore::retrieve<gluten::HashTableBuilder>(getJoin(hashTableId));
+      joinHasNullKeys = hashTableBuilder->joinHasNullKeys();
+      auto originalShared = hashTableBuilder->hashTable();
+      opaqueSharedHashTable = std::shared_ptr<core::OpaqueHashTable>(
+          originalShared, reinterpret_cast<core::OpaqueHashTable*>(originalShared.get()));
+
+      LOG(INFO) << "Successfully retrieved and aliased HashTable for reuse. ID: " << hashTableId;
+    } catch (const std::exception& e) {
+      LOG(WARNING)
+          << "Error retrieving HashTable from ObjectStore: " << e.what()
+          << ". Falling back to building new table. To ensure correct results, please verify that spark.gluten.velox.buildHashTableOncePerExecutor.enabled is set to false.";
+      opaqueSharedHashTable = nullptr;
+    }
+
+    // Create HashJoinNode node
+    return std::make_shared<core::HashJoinNode>(
+        nextPlanNodeId(),
+        joinType,
+        isNullAwareAntiJoin,
+        leftKeys,
+        rightKeys,
+        filter,
+        leftNode,
+        rightNode,
+        getJoinOutputType(leftNode, rightNode, joinType),
+        false,
+        joinHasNullKeys,
+        opaqueSharedHashTable);
   } else {
     // Create HashJoinNode node
     return std::make_shared<core::HashJoinNode>(
@@ -1204,7 +1244,8 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
       const RowTypePtr outRowType = asRowType(children[0]->outputType());
       std::vector<std::string> outNames;
       for (int32_t colIdx = 0; colIdx < outRowType->size(); ++colIdx) {
-        const auto name = outRowType->childAt(colIdx)->name();
+        // Using field names from the unified output row type instead child type names
+        const auto name = outRowType->nameOf(colIdx);
         outNames.push_back(name);
       }
 
@@ -1313,7 +1354,9 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::constructValueStreamNode(
   auto outputType = ROW(std::move(outNames), std::move(veloxTypeList));
 
   // Create TableHandle
-  auto tableHandle = std::make_shared<ValueStreamTableHandle>(kIteratorConnectorId);
+  bool dynamicFilterEnabled =
+      veloxCfg_->get<bool>(kValueStreamDynamicFilterEnabled, kValueStreamDynamicFilterEnabledDefault);
+  auto tableHandle = std::make_shared<ValueStreamTableHandle>(kIteratorConnectorId, dynamicFilterEnabled);
 
   // Create column assignments
   connector::ColumnHandleMap assignments;
@@ -1447,8 +1490,6 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
     SubstraitParser::parseColumnTypes(baseSchema, columnTypes);
   }
 
-  // Velox requires Filter Pushdown must being enabled.
-  bool filterPushdownEnabled = true;
   auto names = colNameList;
   auto types = veloxTypeList;
 
@@ -1456,6 +1497,31 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
   auto baseSchema = ROW(std::move(names), std::move(types));
   // The columns present in the table, if not available default to the baseSchema.
   auto tableSchema = splitInfo->tableSchema ? splitInfo->tableSchema : baseSchema;
+
+  // Build dataColumns from tableSchema, excluding partition columns.
+  // HiveTableHandle::dataColumns() is used as fileSchema for the reader.
+  // Partition columns should not be validated against the file's physical types
+  // (their values come from the partition path, not from the file).
+  std::unordered_set<std::string> partitionColNames;
+  for (int idx = 0; idx < colNameList.size(); idx++) {
+    if (columnTypes[idx] == ColumnType::kPartitionKey) {
+      partitionColNames.insert(colNameList[idx]);
+    }
+  }
+  RowTypePtr dataColumns;
+  if (partitionColNames.empty()) {
+    dataColumns = tableSchema;
+  } else {
+    std::vector<std::string> dataColNames;
+    std::vector<TypePtr> dataColTypes;
+    for (int idx = 0; idx < tableSchema->size(); idx++) {
+      if (partitionColNames.find(tableSchema->nameOf(idx)) == partitionColNames.end()) {
+        dataColNames.push_back(tableSchema->nameOf(idx));
+        dataColTypes.push_back(tableSchema->childAt(idx));
+      }
+    }
+    dataColumns = ROW(std::move(dataColNames), std::move(dataColTypes));
+  }
 
   connector::ConnectorTableHandlePtr tableHandle;
   auto remainingFilter = readRel.has_filter() ? exprConverter_->toVeloxExpr(readRel.filter(), baseSchema) : nullptr;
@@ -1468,7 +1534,7 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
   }
   common::SubfieldFilters subfieldFilters;
   tableHandle = std::make_shared<connector::hive::HiveTableHandle>(
-      connectorId, "hive_table", filterPushdownEnabled, std::move(subfieldFilters), remainingFilter, tableSchema);
+      connectorId, "hive_table", std::move(subfieldFilters), remainingFilter, dataColumns);
 
   // Get assignments and out names.
   std::vector<std::string> outNames;

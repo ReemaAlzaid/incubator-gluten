@@ -16,10 +16,11 @@
  */
 package org.apache.gluten.integration.clickbench
 
-import org.apache.gluten.integration.{DataGen, QuerySet, Suite, TableAnalyzer, TableCreator}
+import org.apache.gluten.integration.{DataGen, QuerySet, Suite}
 import org.apache.gluten.integration.action.Action
 import org.apache.gluten.integration.metrics.MetricMapper
 import org.apache.gluten.integration.report.TestReporter
+import org.apache.gluten.integration.table.{TableAnalyzer, TableCreator}
 
 import org.apache.spark.SparkConf
 
@@ -33,6 +34,7 @@ import java.io.File
  * See the project: https://github.com/ClickHouse/ClickBench Site: https://benchmark.clickhouse.com/
  */
 class ClickBenchSuite(
+    val appName: String,
     val masterUrl: String,
     val actions: Array[Action],
     val testConf: SparkConf,
@@ -58,6 +60,7 @@ class ClickBenchSuite(
     val testMetricMapper: MetricMapper,
     val reportPath: String)
   extends Suite(
+    appName,
     masterUrl,
     actions,
     testConf,
@@ -81,6 +84,12 @@ class ClickBenchSuite(
   ) {
   import ClickBenchSuite._
 
+  require(
+    Set("parquet").contains(dataSource),
+    s"Data source type $dataSource is not supported by ClickBench suite")
+  require(dataScale == 1.0d, "ClickBench suite doesn't support scale factor other than 1")
+  require(!genPartitionedData, "ClickBench suite doesn't support generating partitioned data")
+
   override protected def historyWritePath(): String = HISTORY_WRITE_PATH
 
   override private[integration] def dataWritePath(): String = {
@@ -88,7 +97,6 @@ class ClickBenchSuite(
   }
 
   override private[integration] def createDataGen(): DataGen = {
-    checkDataGenArgs(dataSource, dataScale, genPartitionedData)
     new ClickBenchDataGen(dataWritePath())
   }
 
@@ -109,15 +117,4 @@ private object ClickBenchSuite {
   private val DATA_WRITE_RELATIVE_PATH = "clickbench-generated"
   private val HISTORY_WRITE_PATH = "/tmp/clickbench-history"
   private val ALL_QUERY_IDS = (1 to 43).map(i => s"q$i").toArray
-
-  private def checkDataGenArgs(
-      dataSource: String,
-      scale: Double,
-      genPartitionedData: Boolean): Unit = {
-    require(
-      Set("parquet").contains(dataSource),
-      s"Data source type $dataSource is not supported by ClickBench suite")
-    require(scale == 1.0d, "ClickBench suite doesn't support scale factor other than 1")
-    require(!genPartitionedData, "ClickBench suite doesn't support generating partitioned data")
-  }
 }

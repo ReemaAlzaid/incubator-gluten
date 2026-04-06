@@ -170,7 +170,7 @@ class GlutenConfig(conf: SQLConf) extends GlutenCoreConfig(conf) {
       .equals("org.apache.spark.shuffle.sort.ColumnarShuffleManager")
 
   // Whether to use CelebornShuffleManager.
-  // TODO: Deprecate the API: https://github.com/apache/incubator-gluten/issues/10107.
+  // TODO: Deprecate the API: https://github.com/apache/gluten/issues/10107.
   def isUseCelebornShuffleManager: Boolean =
     conf
       .getConfString("spark.shuffle.manager", "sort")
@@ -201,6 +201,9 @@ class GlutenConfig(conf: SQLConf) extends GlutenCoreConfig(conf) {
 
   def physicalJoinOptimizationThrottle: Integer =
     getConf(COLUMNAR_PHYSICAL_JOIN_OPTIMIZATION_THROTTLE)
+
+  def physicalJoinOptimizationOutputSize: Integer =
+    getConf(COLUMNAR_PHYSICAL_JOIN_OPTIMIZATION_OUTPUT_SIZE)
 
   def enablePhysicalJoinOptimize: Boolean =
     getConf(COLUMNAR_PHYSICAL_JOIN_OPTIMIZATION_ENABLED)
@@ -421,6 +424,8 @@ object GlutenConfig extends ConfigRegistry {
   val SPARK_S3_CONNECTION_MAXIMUM: String = HADOOP_PREFIX + S3_CONNECTION_MAXIMUM
   val S3_ENDPOINT_REGION = "fs.s3a.endpoint.region"
   val SPARK_S3_ENDPOINT_REGION: String = HADOOP_PREFIX + S3_ENDPOINT_REGION
+  val S3_AWS_IMDS_ENABLED = "fs.s3a.aws.imds.enabled"
+  val SPARK_S3_AWS_IMDS_ENABLED: String = HADOOP_PREFIX + S3_AWS_IMDS_ENABLED
 
   // ABFS config
   val ABFS_PREFIX = "fs.azure."
@@ -467,6 +472,10 @@ object GlutenConfig extends ConfigRegistry {
     SQLConf.LEGACY_SIZE_OF_NULL.key,
     SQLConf.LEGACY_STATISTICAL_AGGREGATE.key,
     SQLConf.JSON_GENERATOR_IGNORE_NULL_FIELDS.key,
+    SQLConf.RUNTIME_BLOOM_FILTER_EXPECTED_NUM_ITEMS.key,
+    SQLConf.RUNTIME_BLOOM_FILTER_NUM_BITS.key,
+    SQLConf.RUNTIME_BLOOM_FILTER_MAX_NUM_BITS.key,
+    SQLConf.RUNTIME_BLOOM_FILTER_MAX_NUM_ITEMS.key,
     "spark.io.compression.codec",
     "spark.sql.decimalOperations.allowPrecisionLoss",
     "spark.gluten.sql.columnar.backend.velox.bloomFilter.expectedNumItems",
@@ -484,7 +493,7 @@ object GlutenConfig extends ConfigRegistry {
     SPARK_S3_RETRY_MAX_ATTEMPTS,
     SPARK_S3_CONNECTION_MAXIMUM,
     SPARK_S3_ENDPOINT_REGION,
-    "spark.gluten.velox.fs.s3a.connect.timeout",
+    SPARK_S3_AWS_IMDS_ENABLED,
     "spark.gluten.velox.fs.s3a.retry.mode",
     "spark.gluten.velox.awsSdkLogLevel",
     "spark.gluten.velox.s3UseProxyFromEnv",
@@ -594,7 +603,6 @@ object GlutenConfig extends ConfigRegistry {
       (SPARK_S3_USE_INSTANCE_CREDENTIALS, "false"),
       (SPARK_S3_RETRY_MAX_ATTEMPTS, "20"),
       (SPARK_S3_CONNECTION_MAXIMUM, "15"),
-      ("spark.gluten.velox.fs.s3a.connect.timeout", "200s"),
       ("spark.gluten.velox.fs.s3a.retry.mode", "legacy"),
       (
         "spark.gluten.sql.columnar.backend.velox.IOThreads",
@@ -653,10 +661,6 @@ object GlutenConfig extends ConfigRegistry {
   }
 
   val GLUTEN_ENABLED = GlutenCoreConfig.GLUTEN_ENABLED
-
-  val RAS_ENABLED = GlutenCoreConfig.RAS_ENABLED
-
-  val RAS_COST_MODEL = GlutenCoreConfig.RAS_COST_MODEL
 
   val GLUTEN_UI_ENABLED = buildStaticConf("spark.gluten.ui.enabled")
     .doc(
@@ -997,6 +1001,13 @@ object GlutenConfig extends ConfigRegistry {
       .doc("Fallback to row operators if there are several continuous joins.")
       .intConf
       .createWithDefault(12)
+
+  val COLUMNAR_PHYSICAL_JOIN_OPTIMIZATION_OUTPUT_SIZE =
+    buildConf("spark.gluten.sql.columnar.physicalJoinOptimizationOutputSize")
+      .doc(
+        "Fallback to row operators if there are several continuous joins and matched output size.")
+      .intConf
+      .createWithDefault(52)
 
   val COLUMNAR_PHYSICAL_JOIN_OPTIMIZATION_ENABLED =
     buildConf("spark.gluten.sql.columnar.physicalJoinOptimizeEnable")

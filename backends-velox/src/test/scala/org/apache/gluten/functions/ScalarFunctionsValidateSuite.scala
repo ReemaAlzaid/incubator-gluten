@@ -19,25 +19,11 @@ package org.apache.gluten.functions
 import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution.{BatchScanExecTransformer, FilterExecTransformer, ProjectExecTransformer}
 
-import org.apache.spark.{SparkConf, SparkException}
+import org.apache.spark.SparkException
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.optimizer.NullPropagation
 import org.apache.spark.sql.execution.ProjectExec
 import org.apache.spark.sql.types._
-
-class ScalarFunctionsValidateSuiteRasOff extends ScalarFunctionsValidateSuite {
-  override protected def sparkConf: SparkConf = {
-    super.sparkConf
-      .set(GlutenConfig.RAS_ENABLED.key, "false")
-  }
-}
-
-class ScalarFunctionsValidateSuiteRasOn extends ScalarFunctionsValidateSuite {
-  override protected def sparkConf: SparkConf = {
-    super.sparkConf
-      .set(GlutenConfig.RAS_ENABLED.key, "true")
-  }
-}
 
 abstract class ScalarFunctionsValidateSuite extends FunctionsValidateSuite {
   disableFallbackCheck
@@ -283,6 +269,28 @@ abstract class ScalarFunctionsValidateSuite extends FunctionsValidateSuite {
     }
   }
 
+  test("map_from_entries") {
+    withTempPath {
+      path =>
+        Seq(
+          Seq((1, "10"), (2, "20"), (3, null)),
+          Seq((1, "10"), null, (2, "20")),
+          Seq.empty,
+          null
+        ).toDF("a")
+          .write
+          .parquet(path.getCanonicalPath)
+
+        spark.read
+          .parquet(path.getCanonicalPath)
+          .createOrReplaceTempView("test")
+
+        runQueryAndCompare("select map_from_entries(a) from test") {
+          checkGlutenPlan[ProjectExecTransformer]
+        }
+    }
+  }
+
   test("map_keys") {
     withTempPath {
       path =>
@@ -496,7 +504,7 @@ abstract class ScalarFunctionsValidateSuite extends FunctionsValidateSuite {
     }
   }
 
-  // FIXME: Ignored: https://github.com/apache/incubator-gluten/issues/7600.
+  // FIXME: Ignored: https://github.com/apache/gluten/issues/7600.
   ignore("monotonically_increasintestg_id") {
     runQueryAndCompare("""SELECT monotonically_increasing_id(), l_orderkey
                          | from lineitem limit 100""".stripMargin) {
@@ -1519,6 +1527,38 @@ abstract class ScalarFunctionsValidateSuite extends FunctionsValidateSuite {
         """.stripMargin) {
           checkGlutenPlan[ProjectExecTransformer]
         }
+    }
+  }
+  test("current_timestamp") {
+    withSQLConf(
+      "spark.sql.optimizer.excludedRules" ->
+        "org.apache.spark.sql.catalyst.optimizer.ConstantFolding") {
+      runQueryAndCompare("SELECT l_orderkey, current_timestamp() from lineitem limit 1") {
+        df =>
+          val optimizedPlan = df.queryExecution.optimizedPlan.toString()
+          assert(
+            optimizedPlan.contains("CurrentTimestamp"),
+            s"Expected CurrentTimestamp in plan when ConstantFolding is disabled, " +
+              s"but got: $optimizedPlan"
+          )
+          checkGlutenPlan[ProjectExecTransformer](df)
+      }
+    }
+  }
+
+  test("now") {
+    withSQLConf(
+      "spark.sql.optimizer.excludedRules" ->
+        "org.apache.spark.sql.catalyst.optimizer.ConstantFolding") {
+      runQueryAndCompare("SELECT l_orderkey, now() from lineitem limit 1") {
+        df =>
+          val optimizedPlan = df.queryExecution.optimizedPlan.toString()
+          assert(
+            optimizedPlan.contains("Now"),
+            s"Expected Now in plan when ConstantFolding is disabled, but got: $optimizedPlan"
+          )
+          checkGlutenPlan[ProjectExecTransformer](df)
+      }
     }
   }
 }
